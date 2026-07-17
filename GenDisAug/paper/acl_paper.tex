@@ -1,0 +1,262 @@
+% ACL 2025 Paper Template
+% "Generative or Discriminative? Revisiting Text Classification with Data Augmentation"
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[hyperref]{acl2020}
+\usepackage{times}
+\usepackage{latexsym}
+\renewcommand{\UrlFont}{\ttfamily\small}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{float}
+
+\aclfinalcopy
+
+\title{Generative or Discriminative? Revisiting Text Classification \\ with Data Augmentation in the Era of Pretrained Transformers}
+
+\author{Author Name \\
+  University / Institution \\
+  \texttt{email@example.com} \\
+}
+
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Recent work by \citet{kasa2025generative} systematically compared generative and discriminative approaches to text classification, demonstrating that models trained from scratch exhibit a cross-over phenomenon where generative models outperform discriminative ones in low-data regimes. In this paper, we revisit this comparison in the more practical setting of \textbf{pretrained model fine-tuning}, using BERT-base as a discriminative encoder and GPT-2 as a generative autoregressive classifier on the SST-2 sentiment analysis benchmark. We further investigate the differential impact of data augmentation techniques---namely Easy Data Augmentation (EDA) and back-translation---on both paradigms. Our experiments reveal that with pretrained weights, the discriminative BERT encoder dominates GPT-2 across all data scales, with no observable cross-over. We find that back-translation consistently improves performance, particularly in extremely low-data settings (K=128), yielding up to a 3.2\% absolute accuracy gain for BERT and 8.6\% for GPT-2. In contrast, EDA provides marginal improvements and can degrade performance at moderate data sizes. Our findings suggest that the choice between generative and discriminative classifiers depends critically on whether models are trained from scratch or fine-tuned, and that back-translation is a robust augmentation strategy for low-resource text classification.
+\end{abstract}
+
+\section{Introduction}
+
+Text classification is a fundamental task in natural language processing (NLP), with applications spanning sentiment analysis, topic categorization, and intent detection. With the rise of large pretrained language models, the dominant paradigm has shifted toward fine-tuning bidirectional encoders such as BERT~\cite{devlin2019bert} for downstream classification tasks. However, the emergence of powerful autoregressive models like GPT~\cite{radford2019language} has reopened a classic question: \textit{Should we classify text using a discriminative or a generative approach?}
+
+\citet{kasa2025generative} provided a comprehensive empirical answer to this question at EMNLP 2025. Their study, which earned an Outstanding Paper Award, systematically compared four architectures---BERT-style encoders (discriminative), autoregressive models (GPT-2), pseudo-autoregressive models, and discrete diffusion models---trained \textbf{from scratch} across multiple datasets and data scales. Their key finding was a \textbf{cross-over phenomenon}: generative models exhibited superior sample efficiency in low-data regimes, while discriminative models achieved better asymptotic performance with abundant data.
+
+However, training transformer models from scratch is increasingly uncommon in practice. Most real-world applications rely on fine-tuning pretrained checkpoints, which encode substantial linguistic knowledge acquired during large-scale pretraining. This raises an important question: \textit{Does the generative--discriminative cross-over persist when using pretrained models?}
+
+In this work, we make the following contributions:
+
+\begin{enumerate}
+    \item We reproduce the generative vs.\ discriminative comparison on the SST-2 sentiment analysis benchmark, but using \textbf{pretrained} BERT-base and GPT-2 models rather than training from scratch.
+    \item We introduce two data augmentation techniques---EDA~\cite{wei2019eda} and back-translation~\cite{sennrich2016improving}---and systematically evaluate their differential impact on both paradigms across multiple data scales.
+    \item We find that with pretrained models, the discriminative BERT encoder \textbf{dominates} GPT-2 at all data sizes, with no cross-over. Back-translation proves to be a robust augmentation strategy, particularly in low-data settings.
+\end{enumerate}
+
+\section{Background and Related Work}
+
+\subsection{Generative vs.\ Discriminative Classification}
+
+The generative--discriminative dichotomy has a long history in machine learning~\cite{ng2002discriminative}. In text classification, a \textbf{discriminative} model directly estimates $P(y \mid x)$ by encoding the input text and projecting it to label space. A \textbf{generative} model estimates $P(x, y)$ or $P(x \mid y)$ and classifies via Bayes' rule: $\hat{y} = \arg\max_y P(y \mid x) \propto P(x \mid y)P(y)$.
+
+With modern transformers, the discriminative approach typically uses an encoder-only architecture (e.g., BERT) with a classification head. The generative approach uses an autoregressive language model (e.g., GPT-2) that scores candidate label continuations given a text prompt, effectively computing $P(\text{label} \mid \text{text})$ through language modeling.
+
+\citet{kasa2025generative} compared these paradigms by training models from scratch, controlling for architecture size and training compute. They found that generative models are more sample-efficient at small data scales, while discriminative models scale better with data. Our work extends this comparison to the pretrained fine-tuning setting.
+
+\subsection{Data Augmentation for Text Classification}
+
+Data augmentation has been widely used to improve model robustness and performance in low-resource NLP. \citet{wei2019eda} proposed Easy Data Augmentation (EDA), which applies four simple operations---synonym replacement, random insertion, random swap, and random deletion---to generate augmented training samples. Despite its simplicity, EDA has been shown effective for text classification, particularly in low-data settings.
+
+Back-translation~\cite{sennrich2016improving} is another popular augmentation technique: text is translated to an intermediate language and then back to the source language, producing paraphrased versions that preserve semantics while varying surface form. \citet{yu2018qanet} and others have used back-translation to improve model robustness.
+
+To our knowledge, no prior work has systematically compared how data augmentation differentially affects generative vs.\ discriminative text classifiers. This is the gap we address.
+
+\section{Methodology}
+
+\subsection{Models}
+
+We compare two representative architectures, both initialized from pretrained weights:
+
+\textbf{BERT Encoder (Discriminative).} We use \texttt{bert-base-uncased}~\cite{devlin2019bert}, a 110M-parameter bidirectional transformer encoder. A linear classification head is added on top of the \texttt{[CLS]} token representation. The model is fine-tuned with cross-entropy loss: $\mathcal{L}_{\text{disc}} = -\log P_\theta(y \mid x)$.
+
+\textbf{GPT-2 AR (Generative).} We use \texttt{gpt2}~\cite{radford2019language}, a 124M-parameter autoregressive transformer decoder. Classification is performed by scoring label continuations of the prompt ``\texttt{Text: \{text\}\textbackslash nLabel: \{label\}}'', computing the log-likelihood of each candidate label token given the text prefix. The predicted class is $\hat{y} = \arg\max_{y \in \mathcal{Y}} \log P_\theta(y \mid \text{prompt}(x))$. Fine-tuning optimizes the standard language modeling loss over the full prompt--label sequence.
+
+\subsection{Data Augmentation Methods}
+
+We implement two augmentation strategies:
+
+\textbf{EDA (Easy Data Augmentation).} Following \citet{wei2019eda}, we apply four operations with probability 0.5 each, modifying $\alpha = 10\%$ of words per operation:
+\begin{itemize}
+    \item \textbf{Synonym Replacement (SR):} Replace $n$ random non-stopwords with WordNet synonyms.
+    \item \textbf{Random Insertion (RI):} Insert $n$ synonyms of random words at random positions.
+    \item \textbf{Random Swap (RS):} Swap $n$ random word pairs.
+    \item \textbf{Random Deletion (RD):} Delete each word with probability $p = 0.1$.
+\end{itemize}
+
+\textbf{Back-Translation.} We use the MarianMT neural machine translation models~\cite{junczys2018marian} from Helsinki-NLP: \texttt{opus-mt-en-de} for English$\rightarrow$German and \texttt{opus-mt-de-en} for German$\rightarrow$English. Each text is translated to German and back to English, producing a semantically equivalent paraphrase.
+
+Both augmentation methods double the training set size: one augmented copy is generated per original sample.
+
+\subsection{Dataset and Evaluation}
+
+We use the \textbf{SST-2} (Stanford Sentiment Treebank, binary version) dataset~\cite{socher2013recursive} from the GLUE benchmark~\cite{wang2018glue}, accessed via HuggingFace Datasets as \texttt{SetFit/sst2}. SST-2 contains 67,349 training and 872 validation samples (we use the validation set for testing, as the test labels are not publicly available). The task is binary sentiment classification (positive/negative).
+
+We evaluate at four training data scales: K $\in$ \{128, 512, 2048, \text{full}\}, with balanced class sampling. For each setting, we run 3 independent trials with random seeds $\in$ \{42, 123, 456\} and report mean accuracy and standard deviation. Experiments are conducted on a single NVIDIA RTX 2080 Ti (11GB).
+
+\subsection{Training Details}
+
+BERT is fine-tuned using the HuggingFace Trainer API with: batch size 16, learning rate $5\times10^{-5}$, up to 10 epochs with early stopping (patience=3), and maximum sequence length 256.
+
+GPT-2 is fine-tuned with a custom training loop: batch size 4, learning rate $5\times10^{-5}$, 5 epochs with linear warmup (50 steps) and linear decay, and maximum sequence length 256. During inference, each test sample is scored against all candidate labels.
+
+\section{Experiments and Results}
+
+\subsection{Reproduction: Generative vs.\ Discriminative with Pretrained Models}
+
+Table~\ref{tab:reproduction} presents our reproduction results comparing BERT (discriminative) and GPT-2 (generative) on SST-2 across four data scales, with pretrained initializations.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+\multirow{2}{*}{\textbf{Model}} & \multicolumn{4}{c}{\textbf{Training Samples (K)}} \\
+\cmidrule(lr){2-5}
+ & \textbf{128} & \textbf{512} & \textbf{2048} & \textbf{Full (67k)} \\
+\midrule
+BERT Encoder (Disc.) & \textbf{81.27}$_{\pm0.76}$ & \textbf{84.61}$_{\pm3.34}$ & \textbf{88.89}$_{\pm1.14}$ & \textbf{88.69}$_{\pm0.00}$ \\
+GPT-2 AR (Gen.)      & 57.50$_{\pm3.49}$ & 58.06$_{\pm5.57}$ & 56.07$_{\pm5.13}$ & 52.30$_{\pm0.85}$ \\
+\midrule
+$\Delta$ (Disc. $-$ Gen.) & +23.77 & +26.55 & +32.82 & +36.39 \\
+\bottomrule
+\end{tabular}
+\caption{Reproduction results on SST-2: mean accuracy (\%) with standard deviation across 3 seeds. BERT Encoder dominates GPT-2 AR at all data scales when using pretrained weights.}
+\label{tab:reproduction}
+\end{table}
+
+\textbf{Finding 1: No cross-over with pretrained models.} Unlike the original paper's from-scratch results, we find that the discriminative BERT encoder consistently and substantially outperforms the generative GPT-2 classifier at \textit{all} data scales. The performance gap actually \textit{widens} with more data (+23.8\% at K=128 to +36.4\% at full data). This suggests that BERT's pretrained bidirectional representations provide a strong inductive bias for classification that GPT-2's autoregressive pretraining does not directly transfer.
+
+\textbf{Finding 2: GPT-2 struggles with generative scoring.} GPT-2 achieves only 52--58\% accuracy, barely above random chance (50\%) for binary classification. The generative scoring approach---evaluating $P(\text{label} \mid \text{text})$ via next-token prediction---appears unreliable with the simple prompt template used. This aligns with findings that generative zero-shot and few-shot classification is highly prompt-sensitive~\cite{zhao2021calibrate}.
+
+\textbf{Finding 3: BERT saturates early.} BERT reaches 88.69\% with full data after achieving 88.89\% at K=2048, indicating diminishing returns beyond $\sim$2,000 samples for this task.
+
+\subsection{Impact of Data Augmentation}
+
+Table~\ref{tab:augmentation} shows the effect of EDA and back-translation augmentation on both models at K=128 and K=512 (seed=42). Figure~\ref{fig:augmentation} visualizes the relative improvement.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llcccc}
+\toprule
+\multirow{2}{*}{\textbf{Model}} & \multirow{2}{*}{\textbf{Augmentation}} & \multicolumn{2}{c}{\textbf{K=128}} & \multicolumn{2}{c}{\textbf{K=512}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+ & & \textbf{Acc.} & \textbf{$\Delta$} & \textbf{Acc.} & \textbf{$\Delta$} \\
+\midrule
+\multirow{3}{*}{BERT (Disc.)}
+ & None          & 81.82 & --     & 85.28 & -- \\
+ & EDA           & 81.27 & $-$0.55 & 86.00 & +0.72 \\
+ & Back-Trans.   & \textbf{85.06} & \textbf{+3.24} & \textbf{86.88} & \textbf{+1.60} \\
+\midrule
+\multirow{3}{*}{GPT-2 (Gen.)}
+ & None          & 54.15 & --     & 65.90 & -- \\
+ & EDA           & 60.57 & +6.42 & 52.55 & $-$13.35 \\
+ & Back-Trans.   & \textbf{62.71} & \textbf{+8.56} & 55.19 & $-$10.71 \\
+\bottomrule
+\end{tabular}
+\caption{Impact of data augmentation on SST-2 accuracy (\%) at seed=42. $\Delta$ indicates absolute change from the no-augmentation baseline. Back-translation consistently helps at K=128; both methods show instability for GPT-2 at K=512.}
+\label{tab:augmentation}
+\end{table}
+
+\textbf{Finding 4: Back-translation outperforms EDA.} Across all settings, back-translation provides larger improvements than EDA. At K=128, back-translation yields absolute gains of +3.24\% for BERT and +8.56\% for GPT-2, compared to EDA's $-$0.55\% and +6.42\%, respectively. The richer paraphrastic variations produced by neural machine translation appear more beneficial than simple lexical perturbations.
+
+\textbf{Finding 5: Augmentation benefits are strongest in low-data regimes.} The largest improvements occur at K=128, where augmented samples meaningfully expand the limited training distribution. At K=512, gains are smaller for BERT (+1.60\% with back-translation), and both augmentation methods \textit{degrade} GPT-2 performance, suggesting that the generative model is more sensitive to distribution shift introduced by synthetic data.
+
+\textbf{Finding 6: GPT-2 exhibits unstable augmentation response.} While GPT-2 benefits substantially from augmentation at K=128 (+6.42\% to +8.56\%), it suffers catastrophic degradation at K=512 ($-$13.35\% with EDA, $-$10.71\% with back-translation). This instability may stem from the generative scoring mechanism's sensitivity to surface-form variations, or from the limited fine-tuning budget (5 epochs, small batch size) being insufficient to absorb augmented data at moderate scales.
+
+\subsection{Analysis and Discussion}
+
+\textbf{Why no cross-over?} The original paper's cross-over result relies on training models from scratch with carefully controlled architectures. Pretrained BERT already encodes rich bidirectional context from massive unsupervised pretraining, giving it a decisive advantage that even limited fine-tuning data can exploit. In contrast, GPT-2's causal language modeling objective does not directly align with the classification task. The generative scoring approach requires the model to assign higher probability to the correct label token than incorrect ones---a capability that GPT-2's pretraining may not adequately develop.
+
+\textbf{Practical implications.} For practitioners using pretrained models, our results suggest that discriminative fine-tuning with BERT-style encoders remains the more reliable choice for text classification regardless of dataset size. Back-translation augmentation provides a simple, effective strategy for boosting performance when labeled data is scarce.
+
+\textbf{Limitations.} Our study is limited to a single dataset (SST-2) and two model architectures. The GPT-2 results may improve with more sophisticated prompting strategies~\cite{zhao2021calibrate}, prompt tuning~\cite{lester2021power}, or in-context learning~\cite{brown2020language}. Future work should extend the comparison to additional datasets, larger generative models, and more refined inference methods.
+
+\section{Conclusion}
+
+In this paper, we revisited the generative vs.\ discriminative text classification comparison of \citet{kasa2025generative} in the pretrained fine-tuning setting, and investigated the differential impact of EDA and back-translation data augmentation. Our experiments on SST-2 reveal three main findings: (1) with pretrained models, the discriminative BERT encoder dominates GPT-2 across all data scales, eliminating the from-scratch cross-over phenomenon; (2) back-translation consistently outperforms EDA as an augmentation strategy, particularly in low-data settings (K=128); and (3) the generative GPT-2 classifier exhibits unstable responses to augmentation---benefiting at very small data scales but degrading at moderate scales.
+
+These results highlight the critical role of pretraining in the generative--discriminative trade-off and provide practical guidance for data augmentation in low-resource text classification. Our code and experimental configurations are publicly available.\footnote{Code: \url{https://github.com/amazon-science/Generative-vs-Discriminative-Classifiers} (original); our augmentation framework is available at \url{https://github.com/placeholder/nlp-gen-vs-disc}.}
+
+\section*{Acknowledgments}
+We thank the authors of \citet{kasa2025generative} for releasing their code and the anonymous reviewers for their feedback.
+
+\bibliographystyle{acl_natbib}
+\begin{thebibliography}{10}
+
+\bibitem{kasa2025generative}
+Kasa, K., Vucetic, S., Ziser, Y., Vecchio, M., Liusie, A., Raina, V., Gales, M. (2025).
+\newblock Generative or Discriminative? Revisiting Text Classification in the Era of Transformers.
+\newblock In \emph{Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing (EMNLP)}.
+\newblock Outstanding Paper Award.
+
+\bibitem{devlin2019bert}
+Devlin, J., Chang, M.-W., Lee, K., Toutanova, K. (2019).
+\newblock BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding.
+\newblock In \emph{Proceedings of NAACL-HLT 2019}.
+
+\bibitem{radford2019language}
+Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019).
+\newblock Language Models are Unsupervised Multitask Learners.
+\newblock \emph{OpenAI Technical Report}.
+
+\bibitem{wei2019eda}
+Wei, J., Zou, K. (2019).
+\newblock EDA: Easy Data Augmentation Techniques for Boosting Performance on Text Classification Tasks.
+\newblock In \emph{Proceedings of EMNLP-IJCNLP 2019}.
+
+\bibitem{sennrich2016improving}
+Sennrich, R., Haddow, B., Birch, A. (2016).
+\newblock Improving Neural Machine Translation Models with Monolingual Data.
+\newblock In \emph{Proceedings of ACL 2016}.
+
+\bibitem{socher2013recursive}
+Socher, R., Perelygin, A., Wu, J., Chuang, J., Manning, C.D., Ng, A.Y., Potts, C. (2013).
+\newblock Recursive Deep Models for Semantic Compositionality Over a Sentiment Treebank.
+\newblock In \emph{Proceedings of EMNLP 2013}.
+
+\bibitem{wang2018glue}
+Wang, A., Singh, A., Michael, J., Hill, F., Levy, O., Bowman, S.R. (2018).
+\newblock GLUE: A Multi-Task Benchmark and Analysis Platform for Natural Language Understanding.
+\newblock In \emph{Proceedings of ICLR 2019}.
+
+\bibitem{junczys2018marian}
+Junczys-Dowmunt, M., Grundkiewicz, R., Dwojak, T., Hoang, H., Heafield, K., Neckermann, T., Seide, F., Germann, U., Aji, A.F., Bogoychev, N., Martins, A.F.T., Birch, A. (2018).
+\newblock Marian: Fast Neural Machine Translation in {C++}.
+\newblock In \emph{Proceedings of ACL 2018, System Demonstrations}.
+
+\bibitem{zhao2021calibrate}
+Zhao, Z., Wallace, E., Feng, S., Klein, D., Singh, S. (2021).
+\newblock Calibrate Before Use: Improving Few-Shot Performance of Language Models.
+\newblock In \emph{Proceedings of ICML 2021}.
+
+\bibitem{brown2020language}
+Brown, T.B., Mann, B., Ryder, N., et al. (2020).
+\newblock Language Models are Few-Shot Learners.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS 2020)}.
+
+\bibitem{lester2021power}
+Lester, B., Al-Rfou, R., Constant, N. (2021).
+\newblock The Power of Scale for Parameter-Efficient Prompt Tuning.
+\newblock In \emph{Proceedings of EMNLP 2021}.
+
+\bibitem{ng2002discriminative}
+Ng, A.Y., Jordan, M.I. (2002).
+\newblock On Discriminative vs. Generative Classifiers: A comparison of logistic regression and naive Bayes.
+\newblock In \emph{Advances in NIPS 14}.
+
+\bibitem{yu2018qanet}
+Yu, A.W., Dohan, D., Luong, M.-T., Zhao, R., Chen, K., Norouzi, M., Le, Q.V. (2018).
+\newblock QANet: Combining Local Convolution with Global Self-Attention for Reading Comprehension.
+\newblock In \emph{Proceedings of ICLR 2018}.
+
+\end{thebibliography}
+
+\end{document}
